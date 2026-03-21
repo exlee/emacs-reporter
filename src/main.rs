@@ -28,7 +28,7 @@ struct ProcessKey {
 
 #[derive(Debug)]
 struct ProcessInfo {
-    db_id: i64,
+    db_id: String,
     binary_path: PathBuf,
 }
 
@@ -51,10 +51,13 @@ struct ExtraBaseline {
 struct State {
     conn: Connection,
     known: HashMap<ProcessKey, ProcessInfo>,
-    cpu_baselines: HashMap<i64, CpuBaseline>,
-    extra_baselines: HashMap<i64, ExtraBaseline>, // keyed by process db_id
+    cpu_baselines: HashMap<String, CpuBaseline>,
+    extra_baselines: HashMap<String, ExtraBaseline>,
 }
 
+fn new_uuid() -> String {
+    uuid::Uuid::new_v4().to_string()
+}
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 #[tokio::main]
@@ -119,7 +122,7 @@ fn ensure_schema(conn: &Connection) -> anyhow::Result<()> {
         );
 
         CREATE TABLE IF NOT EXISTS process (
-            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            id                 TEXT PRIMARY KEY,
             pid                INTEGER NOT NULL,
             start_time         INTEGER NOT NULL,
             binary_path        TEXT,
@@ -132,14 +135,14 @@ fn ensure_schema(conn: &Connection) -> anyhow::Result<()> {
         );
 
         CREATE TABLE IF NOT EXISTS sample (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            process_id  INTEGER NOT NULL REFERENCES process (id),
+            id          TEXT PRIMARY KEY,
+            process_id  TEXT NOT NULL REFERENCES process (id),
             sampled_at  INTEGER NOT NULL,
             UNIQUE (process_id, sampled_at)
         );
 
         CREATE TABLE IF NOT EXISTS cpu (
-            sample_id       INTEGER PRIMARY KEY REFERENCES sample (id),
+            sample_id       TEXT PRIMARY KEY REFERENCES sample (id),
             user_ms         INTEGER NOT NULL,
             system_ms       INTEGER NOT NULL,
             delta_user_ms   INTEGER,
@@ -149,7 +152,7 @@ fn ensure_schema(conn: &Connection) -> anyhow::Result<()> {
         );
 
         CREATE TABLE IF NOT EXISTS memory (
-            sample_id           INTEGER PRIMARY KEY REFERENCES sample (id),
+            sample_id           TEXT PRIMARY KEY REFERENCES sample (id),
             virt_size           INTEGER NOT NULL,
             resident_size       INTEGER NOT NULL,
             resident_size_peak  INTEGER NOT NULL,
@@ -161,8 +164,8 @@ fn ensure_schema(conn: &Connection) -> anyhow::Result<()> {
         );
 
         CREATE TABLE IF NOT EXISTS vm_region (
-            id            INTEGER PRIMARY KEY AUTOINCREMENT,
-            sample_id     INTEGER NOT NULL REFERENCES sample (id),
+            id            TEXT PRIMARY KEY,
+            sample_id     TEXT NOT NULL REFERENCES sample (id),
             region_type   TEXT NOT NULL,
             region_count  INTEGER NOT NULL,
             block_count   INTEGER,
@@ -179,7 +182,7 @@ fn ensure_schema(conn: &Connection) -> anyhow::Result<()> {
 
         -- Thread and page fault counters
         CREATE TABLE IF NOT EXISTS threads (
-            sample_id      INTEGER PRIMARY KEY REFERENCES sample (id),
+            sample_id      TEXT PRIMARY KEY REFERENCES sample (id),
             thread_count   INTEGER NOT NULL,
             running_count  INTEGER NOT NULL,
             -- cumulative since process start
@@ -194,7 +197,7 @@ fn ensure_schema(conn: &Connection) -> anyhow::Result<()> {
 
         -- Disk I/O counters (cumulative since process start)
         CREATE TABLE IF NOT EXISTS io (
-            sample_id             INTEGER PRIMARY KEY REFERENCES sample (id),
+            sample_id             TEXT PRIMARY KEY REFERENCES sample (id),
             bytes_read            INTEGER NOT NULL,
             bytes_written         INTEGER NOT NULL,
             logical_writes        INTEGER NOT NULL,
@@ -205,13 +208,13 @@ fn ensure_schema(conn: &Connection) -> anyhow::Result<()> {
 
         -- Mach ports and file descriptors
         CREATE TABLE IF NOT EXISTS ports (
-            sample_id         INTEGER PRIMARY KEY REFERENCES sample (id),
+            sample_id         TEXT PRIMARY KEY REFERENCES sample (id),
             mach_port_count   INTEGER NOT NULL,
             fd_count          INTEGER NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS display_snapshot (
-            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            id             TEXT PRIMARY KEY,
             sampled_at     INTEGER NOT NULL,
             display_index  INTEGER NOT NULL,
             width_px       INTEGER NOT NULL,
@@ -223,8 +226,8 @@ fn ensure_schema(conn: &Connection) -> anyhow::Result<()> {
         );
 
         CREATE TABLE IF NOT EXISTS sample_display (
-            sample_id           INTEGER NOT NULL REFERENCES sample (id),
-            display_snapshot_id INTEGER NOT NULL REFERENCES display_snapshot (id),
+            sample_id           TEXT NOT NULL REFERENCES sample (id),
+            display_snapshot_id TEXT NOT NULL REFERENCES display_snapshot (id),
             PRIMARY KEY (sample_id, display_snapshot_id)
         );
         CREATE INDEX IF NOT EXISTS idx_sample_process   ON sample (process_id, sampled_at);
@@ -313,15 +316,17 @@ fn insert_display_snapshots(
     conn: &Connection,
     now: i64,
     displays: &[display_data::DisplayInfo],
-) -> anyhow::Result<Vec<i64>> {
+) -> anyhow::Result<Vec<String>> {
     let mut ids = Vec::with_capacity(displays.len());
     for display in displays {
+        let id = new_uuid();
         conn.execute(
             "INSERT INTO display_snapshot
-             (sampled_at, display_index, width_px, height_px, refresh_rate,
+             (id, sampled_at, display_index, width_px, height_px, refresh_rate,
               width_mm, height_mm, is_main)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
+                id,
                 now,
                 display.display_index,
                 display.width_px,
@@ -332,7 +337,7 @@ fn insert_display_snapshots(
                 display.is_main as i64,
             ],
         )?;
-        ids.push(conn.last_insert_rowid());
+        ids.push(id);
     }
     Ok(ids)
 }
@@ -340,7 +345,7 @@ fn collect_process(
     state: &mut State,
     pid: i32,
     now: i64,
-    display_ids: &[i64],
+    display_ids: &[String],
 ) -> anyhow::Result<()> {
     let start_time = platform::process_start_time(pid)?;
     let key = ProcessKey { pid, start_time };
@@ -350,7 +355,7 @@ fn collect_process(
         state.known.insert(key.clone(), info);
     }
 
-    let process_db_id = state.known[&key].db_id;
+    let process_db_id = state.known[&key].db_id.clone();
 
     state.conn.execute(
         "UPDATE process SET last_seen_at = ?1 WHERE id = ?2",
@@ -405,11 +410,11 @@ fn collect_process(
     let tx = state.conn.unchecked_transaction()?;
 
     let result = (|| -> anyhow::Result<()> {
+        let sample_id = new_uuid();
         tx.execute(
-            "INSERT INTO sample (process_id, sampled_at) VALUES (?1, ?2)",
-            params![process_db_id, now],
+            "INSERT INTO sample (id, process_id, sampled_at) VALUES (?1, ?2, ?3)",
+            params![sample_id, process_db_id, now],
         )?;
-        let sample_id = tx.last_insert_rowid();
 
         tx.execute(
             "INSERT INTO cpu
@@ -447,11 +452,12 @@ fn collect_process(
         for region in &regions {
             tx.execute(
                 "INSERT INTO vm_region
-                 (sample_id, region_type, region_count, block_count,
+                 (id, sample_id, region_type, region_count, block_count,
                   virtual_size, resident_size, dirty_size, swapped_size,
                   shared_size, private_size, protection, share_mode)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
                 params![
+                    new_uuid(),
                     sample_id,
                     region.region_type,
                     region.region_count,
@@ -508,7 +514,7 @@ fn collect_process(
             params![sample_id, port_data.mach_port_count, port_data.fd_count],
         )?;
 
-        for &display_snapshot_id in display_ids {
+        for display_snapshot_id in display_ids {
             tx.execute(
                 "INSERT INTO sample_display (sample_id, display_snapshot_id)
                  VALUES (?1, ?2)",
@@ -522,7 +528,7 @@ fn collect_process(
         Ok(()) => {
             tx.commit()?;
             state.cpu_baselines.insert(
-                process_db_id,
+                process_db_id.clone(),
                 CpuBaseline {
                     user_ms: cpu_data.user_ms,
                     system_ms: cpu_data.system_ms,
@@ -561,12 +567,14 @@ fn bootstrap_process(
 
     let (emacs_version, configure_options, build_features) = probe_emacs_binary(&binary_path);
 
+    let id = new_uuid();
     conn.execute(
         "INSERT OR IGNORE INTO process
-         (pid, start_time, binary_path, emacs_version, configure_options, build_features,
+         (id, pid, start_time, binary_path, emacs_version, configure_options, build_features,
           first_seen_at, last_seen_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
+            id,
             pid,
             start_time,
             binary_path.to_string_lossy().as_ref(),
@@ -578,7 +586,7 @@ fn bootstrap_process(
         ],
     )?;
 
-    let db_id = conn.query_row(
+    let db_id: String = conn.query_row(
         "SELECT id FROM process WHERE pid = ?1 AND start_time = ?2",
         params![pid, start_time],
         |r| r.get(0),
