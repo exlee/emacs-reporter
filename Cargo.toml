@@ -7,6 +7,14 @@ edition = "2024"
 name = "emacs-report-uploader"
 path = "src/bin/emacs-report-uploader.rs"
 
+[[bin]]
+name = "emacs-report-merge"
+path = "src/bin/emacs-report-merge.rs"
+required-features = ["merge"]
+
+[features]
+merge = []
+
 [dependencies]
 anyhow = "1.0.102"
 bzip2 = "0.6.1"

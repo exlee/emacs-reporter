@@ -1,7 +1,5 @@
 #![cfg(target_os = "macos")]
 
-use anyhow::Context;
-
 // ── Public types ──────────────────────────────────────────────────────────────
 
 pub struct ThreadData {

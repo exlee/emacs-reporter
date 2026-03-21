@@ -15,6 +15,7 @@ pub struct DisplayInfo {
 // ── FFI ───────────────────────────────────────────────────────────────────────
 
 #[allow(non_camel_case_types)]
+#[allow(non_upper_case_globals)]
 mod ffi {
     pub type CGDirectDisplayID = u32;
     pub type CGDisplayCount = u32;

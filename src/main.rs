@@ -5,7 +5,6 @@ use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, params};
-use tokio::time;
 use tracing::{error, info, warn};
 
 mod extra_data;
@@ -29,6 +28,7 @@ struct ProcessKey {
 #[derive(Debug)]
 struct ProcessInfo {
     db_id: String,
+    #[allow(unused)]
     binary_path: PathBuf,
 }
 
@@ -79,7 +79,9 @@ async fn main() -> anyhow::Result<()> {
         "emacs-reporter started, interval = {}s",
         SAMPLE_INTERVAL.as_secs()
     );
+
     tokio::time::sleep(Duration::from_secs(1)).await;
+
     loop {
         if let Err(e) = collect_snapshot(&mut state) {
             error!("snapshot failed: {e:#}");
@@ -103,7 +105,7 @@ fn open_db(path: &str) -> anyhow::Result<Connection> {
         PRAGMA journal_mode = WAL;
         PRAGMA foreign_keys = ON;
         PRAGMA synchronous = FULL;
-        PRAGMA wal_checkpoint(TRUNCATE);
+        --PRAGMA wal_checkpoint(TRUNCATE);
     ",
     )?;
 
