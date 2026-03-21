@@ -1,0 +1,57 @@
+name: release
+
+permissions:
+  contents: write
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install rust targets
+        run: |
+          rustup target add aarch64-apple-darwin
+          rustup target add x86_64-apple-darwin
+
+      - name: build arm
+        run: |
+          cargo build --release --target aarch64-apple-darwin
+          cargo build --release --bin emacs-report-uploader --target aarch64-apple-darwin
+        env:
+          EMACS_REPORTER_UPLOAD_URL: ${{ secrets.EMACS_REPORTER_UPLOAD_URL }}
+
+      - name: build x86
+        run: |
+          cargo build --release --target x86_64-apple-darwin
+          cargo build --release --bin emacs-report-uploader --target x86_64-apple-darwin
+        env:
+          EMACS_REPORTER_UPLOAD_URL: ${{ secrets.EMACS_REPORTER_UPLOAD_URL }}
+
+      - name: collect artifacts
+        run: |
+          TIMESTAMP=$(date -u +%y%m%d%H%M%S)
+          echo "RELEASE_TAG=${TIMESTAMP}" >> $GITHUB_ENV
+
+          mkdir -p dist
+          cp target/aarch64-apple-darwin/release/emacs-reporter        dist/emacs-reporter-arm
+          cp target/aarch64-apple-darwin/release/emacs-report-uploader  dist/emacs-report-uploader-arm
+          cp target/x86_64-apple-darwin/release/emacs-reporter          dist/emacs-reporter-x86
+          cp target/x86_64-apple-darwin/release/emacs-report-uploader   dist/emacs-report-uploader-x86
+          cp sign_emacs.sh                                               dist/sign_emacs.sh
+          chmod +x dist/sign_emacs.sh
+
+      - name: create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: ${{ env.RELEASE_TAG }}
+          files: |
+            dist/emacs-reporter-arm
+            dist/emacs-reporter-x86
+            dist/emacs-report-uploader-arm
+            dist/emacs-report-uploader-x86
+            dist/sign_emacs.sh
