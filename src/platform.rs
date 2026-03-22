@@ -12,6 +12,11 @@ use anyhow::Context;
 pub struct CpuData {
     pub user_ms: i64,
     pub system_ms: i64,
+    pub messages_sent: i64,
+    pub messages_received: i64,
+    pub syscalls_mach: i64,
+    pub syscalls_unix: i64,
+    pub context_switches: i64,
 }
 
 pub struct MemoryData {
@@ -23,6 +28,8 @@ pub struct MemoryData {
     pub private_size: Option<i64>,
     pub shared_size: Option<i64>,
     pub swapped_size: Option<i64>,
+    pub purgeable_volatile: Option<i64>,
+    pub purgeable_nonvolatile: Option<i64>,
 }
 
 pub struct VmRegion {
@@ -302,6 +309,11 @@ pub fn collect_cpu(pid: i32) -> anyhow::Result<CpuData> {
     Ok(CpuData {
         user_ms: (info.pti_total_user / 1_000_000) as i64,
         system_ms: (info.pti_total_system / 1_000_000) as i64,
+        messages_sent: info.pti_messages_sent as i64,
+        messages_received: info.pti_messages_received as i64,
+        syscalls_mach: info.pti_syscalls_mach as i64,
+        syscalls_unix: info.pti_syscalls_unix as i64,
+        context_switches: info.pti_csw as i64,
     })
 }
 
@@ -348,6 +360,8 @@ pub fn collect_memory(pid: i32) -> anyhow::Result<MemoryData> {
         private_size: Some(info.internal as i64),
         shared_size: Some(info.external as i64),
         swapped_size: Some(info.compressed as i64),
+        purgeable_volatile: Some(info.purgeable_volatile_resident as i64),
+        purgeable_nonvolatile: Some(info.purgeable_volatile_pmap as i64),
     })
 }
 

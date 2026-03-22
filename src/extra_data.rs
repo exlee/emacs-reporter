@@ -21,6 +21,11 @@ pub struct PortData {
     pub fd_count: i64,
 }
 
+pub struct EnergyData {
+    pub cpu_energy_nj: i64,
+    pub gpu_time_ms: i64,
+}
+
 // ── FFI ───────────────────────────────────────────────────────────────────────
 
 #[allow(non_camel_case_types)]
@@ -340,4 +345,25 @@ fn collect_port_count_via_names(task: ffi::mach_port_t) -> anyhow::Result<i64> {
     }
 
     Ok(names_count as i64)
+}
+
+// ── Energy / GPU data ─────────────────────────────────────────────────────────
+
+pub fn collect_energy(pid: i32) -> anyhow::Result<EnergyData> {
+    let mut info: ffi::rusage_info_v2 = unsafe { std::mem::zeroed() };
+    let ret = unsafe {
+        ffi::proc_pid_rusage(
+            pid,
+            2, // RUSAGE_INFO_V2
+            &mut info as *mut _ as *mut _,
+        )
+    };
+    anyhow::ensure!(ret == 0, "proc_pid_rusage failed for pid {pid}: {ret}");
+
+    Ok(EnergyData {
+        cpu_energy_nj: info.ri_billed_energy as i64,
+        // GPU time is not directly available; ri_cpu_time_qos_user_interactive
+        // is a proxy for UI/compositor activity (nanoseconds → milliseconds)
+        gpu_time_ms: (info.ri_cpu_time_qos_user_interactive / 1_000_000) as i64,
+    })
 }

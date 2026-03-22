@@ -58,12 +58,17 @@ Every sample (10 min interval) records the following:
 | `process` | `build_features` | `system-configuration-features` at build time |
 | `cpu` | `user_ms`, `system_ms` | Cumulative CPU time since process start |
 | `cpu` | `cpu_percent` | CPU utilisation over the sample interval |
+| `cpu` | `messages_sent`, `messages_received` | Cumulative Mach IPC message counts since process start |
+| `cpu` | `syscalls_mach`, `syscalls_unix` | Cumulative Mach and BSD syscall counts since process start |
+| `cpu` | `context_switches`, `delta_csw` | Cumulative context switches and delta vs previous sample |
 | `memory` | `virt_size` | Virtual memory size |
 | `memory` | `resident_size` | Resident set size (RSS) |
 | `memory` | `phys_footprint` | Physical footprint (Activity Monitor value) |
 | `memory` | `phys_footprint_peak` | Lifetime peak physical footprint |
 | `memory` | `private_size`, `shared_size` | Private vs shared memory |
 | `memory` | `swapped_size` | Compressed/swapped memory |
+| `memory` | `purgeable_volatile` | Purgeable volatile resident memory |
+| `memory` | `purgeable_nonvolatile` | Purgeable non-volatile memory (pmap) |
 | `vm_region` | `region_type` | VM region tag (`__TEXT`, `MALLOC_SMALL`, `STACK`, etc.) |
 | `vm_region` | `dirty_size`, `swapped_size` | Dirty and swapped pages per region type |
 | `vm_region` | `resident_size`, `virtual_size` | Resident and virtual size per region type |
@@ -75,6 +80,9 @@ Every sample (10 min interval) records the following:
 | `io` | `logical_writes` | Logical write bytes since process start |
 | `ports` | `mach_port_count` | Mach port count |
 | `ports` | `fd_count` | Open file descriptor count |
+| `energy` | `cpu_energy_nj` | Cumulative CPU energy billed to the process, in nanojoules |
+| `energy` | `gpu_time_ms` | Proxy for GPU/compositor activity (user-interactive QoS CPU time, ms) |
+| `energy` | `delta_cpu_energy_nj`, `delta_gpu_time_ms` | Deltas vs previous sample |
 | `display_snapshot` | `width_px`, `height_px` | Display resolution |
 | `display_snapshot` | `refresh_rate` | Refresh rate in Hz |
 | `display_snapshot` | `width_mm`, `height_mm` | Physical display size |

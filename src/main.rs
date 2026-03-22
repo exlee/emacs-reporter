@@ -53,6 +53,8 @@ struct State {
     known: HashMap<ProcessKey, ProcessInfo>,
     cpu_baselines: HashMap<String, CpuBaseline>,
     extra_baselines: HashMap<String, ExtraBaseline>,
+    csw_baselines: HashMap<String, i64>,
+    energy_baselines: HashMap<String, extra_data::EnergyData>,
 }
 
 fn new_uuid() -> String {
@@ -73,6 +75,8 @@ async fn main() -> anyhow::Result<()> {
         known: HashMap::new(),
         cpu_baselines: HashMap::new(),
         extra_baselines: HashMap::new(),
+        csw_baselines: HashMap::new(),
+        energy_baselines: HashMap::new(),
     };
 
     info!(
@@ -144,25 +148,33 @@ fn ensure_schema(conn: &Connection) -> anyhow::Result<()> {
         );
 
         CREATE TABLE IF NOT EXISTS cpu (
-            sample_id       TEXT PRIMARY KEY REFERENCES sample (id),
-            user_ms         INTEGER NOT NULL,
-            system_ms       INTEGER NOT NULL,
-            delta_user_ms   INTEGER,
-            delta_system_ms INTEGER,
-            interval_ms     INTEGER,
-            cpu_percent     REAL
+            sample_id         TEXT PRIMARY KEY REFERENCES sample (id),
+            user_ms           INTEGER NOT NULL,
+            system_ms         INTEGER NOT NULL,
+            delta_user_ms     INTEGER,
+            delta_system_ms   INTEGER,
+            interval_ms       INTEGER,
+            cpu_percent       REAL,
+            messages_sent     INTEGER,
+            messages_received INTEGER,
+            syscalls_mach     INTEGER,
+            syscalls_unix     INTEGER,
+            context_switches  INTEGER,
+            delta_csw         INTEGER
         );
 
         CREATE TABLE IF NOT EXISTS memory (
-            sample_id           TEXT PRIMARY KEY REFERENCES sample (id),
-            virt_size           INTEGER NOT NULL,
-            resident_size       INTEGER NOT NULL,
-            resident_size_peak  INTEGER NOT NULL,
-            phys_footprint      INTEGER NOT NULL,
-            phys_footprint_peak INTEGER NOT NULL,
-            private_size        INTEGER,
-            shared_size         INTEGER,
-            swapped_size        INTEGER
+            sample_id             TEXT PRIMARY KEY REFERENCES sample (id),
+            virt_size             INTEGER NOT NULL,
+            resident_size         INTEGER NOT NULL,
+            resident_size_peak    INTEGER NOT NULL,
+            phys_footprint        INTEGER NOT NULL,
+            phys_footprint_peak   INTEGER NOT NULL,
+            private_size          INTEGER,
+            shared_size           INTEGER,
+            swapped_size          INTEGER,
+            purgeable_volatile    INTEGER,
+            purgeable_nonvolatile INTEGER
         );
 
         CREATE TABLE IF NOT EXISTS vm_region (
@@ -232,6 +244,14 @@ fn ensure_schema(conn: &Connection) -> anyhow::Result<()> {
             display_snapshot_id TEXT NOT NULL REFERENCES display_snapshot (id),
             PRIMARY KEY (sample_id, display_snapshot_id)
         );
+        CREATE TABLE IF NOT EXISTS energy (
+            sample_id           TEXT PRIMARY KEY REFERENCES sample (id),
+            cpu_energy_nj       INTEGER NOT NULL,
+            gpu_time_ms         INTEGER NOT NULL,
+            delta_cpu_energy_nj INTEGER,
+            delta_gpu_time_ms   INTEGER
+        );
+
         CREATE INDEX IF NOT EXISTS idx_sample_process   ON sample (process_id, sampled_at);
         CREATE INDEX IF NOT EXISTS idx_vm_region_sample ON vm_region (sample_id);
         CREATE INDEX IF NOT EXISTS idx_vm_region_type   ON vm_region (region_type, sample_id);
@@ -371,6 +391,7 @@ fn collect_process(
     let thread_data = extra_data::collect_threads_and_faults(pid)?;
     let io_data = extra_data::collect_io(pid)?;
     let port_data = extra_data::collect_ports_and_fds(pid)?;
+    let energy_data = extra_data::collect_energy(pid)?;
 
     // CPU deltas
     let cpu_baseline = state.cpu_baselines.get(&process_db_id);
@@ -408,6 +429,19 @@ fn collect_process(
         None => (None, None, None),
     };
 
+    let delta_csw = state
+        .csw_baselines
+        .get(&process_db_id)
+        .map(|&prev| cpu_data.context_switches - prev);
+
+    let (delta_cpu_energy_nj, delta_gpu_time_ms) = match state.energy_baselines.get(&process_db_id) {
+        Some(b) => (
+            Some(energy_data.cpu_energy_nj - b.cpu_energy_nj),
+            Some(energy_data.gpu_time_ms - b.gpu_time_ms),
+        ),
+        None => (None, None),
+    };
+
     // ── Single transaction — all or nothing ───────────────────────────────────
     let tx = state.conn.unchecked_transaction()?;
 
@@ -420,8 +454,9 @@ fn collect_process(
 
         tx.execute(
             "INSERT INTO cpu
-             (sample_id, user_ms, system_ms, delta_user_ms, delta_system_ms, interval_ms, cpu_percent)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+             (sample_id, user_ms, system_ms, delta_user_ms, delta_system_ms, interval_ms, cpu_percent,
+              messages_sent, messages_received, syscalls_mach, syscalls_unix, context_switches, delta_csw)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
                 sample_id,
                 cpu_data.user_ms,
@@ -430,14 +465,21 @@ fn collect_process(
                 delta_system,
                 interval_ms,
                 cpu_percent,
+                cpu_data.messages_sent,
+                cpu_data.messages_received,
+                cpu_data.syscalls_mach,
+                cpu_data.syscalls_unix,
+                cpu_data.context_switches,
+                delta_csw,
             ],
         )?;
 
         tx.execute(
             "INSERT INTO memory
              (sample_id, virt_size, resident_size, resident_size_peak,
-              phys_footprint, phys_footprint_peak, private_size, shared_size, swapped_size)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+              phys_footprint, phys_footprint_peak, private_size, shared_size, swapped_size,
+              purgeable_volatile, purgeable_nonvolatile)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 sample_id,
                 mem_data.virt_size,
@@ -448,6 +490,8 @@ fn collect_process(
                 mem_data.private_size,
                 mem_data.shared_size,
                 mem_data.swapped_size,
+                mem_data.purgeable_volatile,
+                mem_data.purgeable_nonvolatile,
             ],
         )?;
 
@@ -516,6 +560,19 @@ fn collect_process(
             params![sample_id, port_data.mach_port_count, port_data.fd_count],
         )?;
 
+        tx.execute(
+            "INSERT INTO energy
+             (sample_id, cpu_energy_nj, gpu_time_ms, delta_cpu_energy_nj, delta_gpu_time_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                sample_id,
+                energy_data.cpu_energy_nj,
+                energy_data.gpu_time_ms,
+                delta_cpu_energy_nj,
+                delta_gpu_time_ms,
+            ],
+        )?;
+
         for display_snapshot_id in display_ids {
             tx.execute(
                 "INSERT INTO sample_display (sample_id, display_snapshot_id)
@@ -538,7 +595,7 @@ fn collect_process(
                 },
             );
             state.extra_baselines.insert(
-                process_db_id,
+                process_db_id.clone(),
                 ExtraBaseline {
                     faults_total: thread_data.faults_total,
                     faults_cow: thread_data.faults_cow,
@@ -546,6 +603,14 @@ fn collect_process(
                     bytes_read: io_data.bytes_read,
                     bytes_written: io_data.bytes_written,
                     logical_writes: io_data.logical_writes,
+                },
+            );
+            state.csw_baselines.insert(process_db_id.clone(), cpu_data.context_switches);
+            state.energy_baselines.insert(
+                process_db_id,
+                extra_data::EnergyData {
+                    cpu_energy_nj: energy_data.cpu_energy_nj,
+                    gpu_time_ms: energy_data.gpu_time_ms,
                 },
             );
             info!("pid {pid}: snapshot committed");
