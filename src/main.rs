@@ -127,6 +127,15 @@ fn ensure_schema(conn: &Connection) -> anyhow::Result<()> {
             created_at       INTEGER NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS system_info (
+            id         INTEGER PRIMARY KEY CHECK (id = 1),
+            total_ram  INTEGER NOT NULL,
+            cpu_arch   TEXT NOT NULL,
+            cpu_cores  INTEGER NOT NULL,
+            hw_model   TEXT,
+            cpu_brand  TEXT
+        );
+
         CREATE TABLE IF NOT EXISTS process (
             id                 TEXT PRIMARY KEY,
             pid                INTEGER NOT NULL,
@@ -297,8 +306,19 @@ fn ensure_meta(conn: &Connection) -> anyhow::Result<()> {
              VALUES (1, ?1, ?2, ?3, ?4)",
             params![user_hash, os_version, REPORTER_VERSION, now],
         )?;
+        insert_system_info(conn)?;
     }
 
+    Ok(())
+}
+
+fn insert_system_info(conn: &Connection) -> anyhow::Result<()> {
+    let info = platform::collect_system_info()?;
+    conn.execute(
+        "INSERT INTO system_info (id, total_ram, cpu_arch, cpu_cores, hw_model, cpu_brand)
+         VALUES (1, ?1, ?2, ?3, ?4, ?5)",
+        params![info.total_ram, info.cpu_arch, info.cpu_cores, info.hw_model, info.cpu_brand],
+    )?;
     Ok(())
 }
 

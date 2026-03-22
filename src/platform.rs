@@ -214,6 +214,14 @@ mod ffi {
         pub fn proc_listallpids(buffer: *mut std::ffi::c_void, buffersize: c_int) -> c_int;
 
         pub fn proc_pidpath(pid: c_int, buffer: *mut std::ffi::c_void, buffersize: u32) -> c_int;
+
+        pub fn sysctlbyname(
+            name: *const std::ffi::c_char,
+            oldp: *mut std::ffi::c_void,
+            oldlenp: *mut libc::size_t,
+            newp: *mut std::ffi::c_void,
+            newlen: libc::size_t,
+        ) -> c_int;
     }
 
     pub const PROC_PIDPATHINFO_MAXSIZE: u32 = 4096;
@@ -519,6 +527,93 @@ fn share_mode_string(mode: u8) -> String {
         _ => "UNK",
     }
     .to_owned()
+}
+
+// ── System info ───────────────────────────────────────────────────────────────
+
+pub struct SystemInfo {
+    pub total_ram: i64,
+    pub cpu_arch: String,
+    pub cpu_cores: i64,
+    pub hw_model: String,
+    pub cpu_brand: Option<String>,
+}
+
+fn sysctl_string(name: &std::ffi::CStr) -> Option<String> {
+    let mut len: libc::size_t = 0;
+    let ret = unsafe {
+        ffi::sysctlbyname(
+            name.as_ptr(),
+            std::ptr::null_mut(),
+            &mut len,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if ret != 0 || len == 0 {
+        return None;
+    }
+    let mut buf = vec![0u8; len];
+    let ret = unsafe {
+        ffi::sysctlbyname(
+            name.as_ptr(),
+            buf.as_mut_ptr() as *mut _,
+            &mut len,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if ret != 0 {
+        return None;
+    }
+    while buf.last() == Some(&0) {
+        buf.pop();
+    }
+    String::from_utf8(buf).ok()
+}
+
+fn sysctl_u64(name: &std::ffi::CStr) -> Option<u64> {
+    let mut val: u64 = 0;
+    let mut len = std::mem::size_of::<u64>() as libc::size_t;
+    let ret = unsafe {
+        ffi::sysctlbyname(
+            name.as_ptr(),
+            &mut val as *mut _ as *mut _,
+            &mut len,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if ret == 0 { Some(val) } else { None }
+}
+
+fn sysctl_i32(name: &std::ffi::CStr) -> Option<i32> {
+    let mut val: i32 = 0;
+    let mut len = std::mem::size_of::<i32>() as libc::size_t;
+    let ret = unsafe {
+        ffi::sysctlbyname(
+            name.as_ptr(),
+            &mut val as *mut _ as *mut _,
+            &mut len,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if ret == 0 { Some(val) } else { None }
+}
+
+pub fn collect_system_info() -> anyhow::Result<SystemInfo> {
+    let total_ram = sysctl_u64(c"hw.memsize")
+        .context("sysctl hw.memsize failed")? as i64;
+    let cpu_arch = sysctl_string(c"hw.machine")
+        .context("sysctl hw.machine failed")?;
+    let cpu_cores = sysctl_i32(c"hw.logicalcpu")
+        .context("sysctl hw.logicalcpu failed")? as i64;
+    let hw_model = sysctl_string(c"hw.model")
+        .context("sysctl hw.model failed")?;
+    let cpu_brand = sysctl_string(c"machdep.cpu.brand_string");
+
+    Ok(SystemInfo { total_ram, cpu_arch, cpu_cores, hw_model, cpu_brand })
 }
 
 // ── Meta helpers ──────────────────────────────────────────────────────────────
