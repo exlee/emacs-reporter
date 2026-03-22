@@ -8,6 +8,7 @@ use rusqlite::{Connection, params};
 use tracing::{error, info, warn};
 
 mod extra_data;
+mod packages;
 mod platform;
 mod display_data;
 
@@ -259,6 +260,19 @@ fn ensure_schema(conn: &Connection) -> anyhow::Result<()> {
             gpu_time_ms         INTEGER NOT NULL,
             delta_cpu_energy_nj INTEGER,
             delta_gpu_time_ms   INTEGER
+        );
+
+        CREATE TABLE IF NOT EXISTS installed_package (
+            id       TEXT PRIMARY KEY,
+            name     TEXT NOT NULL,
+            version  TEXT NOT NULL,
+            UNIQUE (name, version)
+        );
+
+        CREATE TABLE IF NOT EXISTS process_package (
+            process_id  TEXT NOT NULL REFERENCES process (id),
+            package_id  TEXT NOT NULL REFERENCES installed_package (id),
+            PRIMARY KEY (process_id, package_id)
         );
 
         CREATE INDEX IF NOT EXISTS idx_sample_process   ON sample (process_id, sampled_at);
@@ -678,6 +692,22 @@ fn bootstrap_process(
         params![pid, start_time],
         |r| r.get(0),
     )?;
+
+    // Collect and store installed ELPA packages for this process
+    let pkgs = packages::collect_packages(&binary_path);
+    for pkg in &pkgs {
+        conn.execute(
+            "INSERT OR IGNORE INTO installed_package (id, name, version) VALUES (?1, ?2, ?3)",
+            params![pkg.id, pkg.name, pkg.version],
+        )?;
+        conn.execute(
+            "INSERT OR IGNORE INTO process_package (process_id, package_id) VALUES (?1, ?2)",
+            params![db_id, pkg.id],
+        )?;
+    }
+    if !pkgs.is_empty() {
+        info!("pid {pid}: recorded {} ELPA packages", pkgs.len());
+    }
 
     info!("bootstrapped pid {pid} → db id {db_id}");
 
