@@ -2,9 +2,9 @@
 
 Collects Emacs process metrics over time and stores them locally in a SQLite database. If you're willing to share your data, there's an uploader too.
 
-I'm looking for long-running patterns — days, weeks, ideally months. A few samples won't tell much.
+I'm looking for long-running patterns — days, weeks, maybe even months. Short term sampling didn't uncover any anomalies helpful in improving Emacs performance on macOS.
 
-The low-level platform code and architecture decisions are mine. LLM assisted with boilerplate and Rust/macOS API wiring.
+Disclaimer: The low-level platform code and architecture decisions are mine. LLM assisted with boilerplate and Rust/macOS API wiring.
 
 ---
 
@@ -21,9 +21,11 @@ sudo ./emacs-reporter
 ./emacs-reporter
 ```
 
+Reporter takes first sample as soon as it starts and reports found errors.
+
 The signing script works with both `.app` bundles and raw binaries (`which emacs`). Re-run it after Emacs updates.
 
-The reporter samples every 10 minutes and writes to `emacs_reporter.db` in the current directory. It's a plain SQLite3 file — open it with `litecli`, TablePlus, or any SQLite tool if you want to inspect what's collected.
+The reporter samples every 10 minutes and writes to `emacs_reporter.db` in the current directory. It's a plain SQLite3 file — open it with SQLite3 cli, `litecli`, TablePlus, or any SQLite tool if you want to inspect what's collected.
 
 ---
 
@@ -38,6 +40,8 @@ The reporter samples every 10 minutes and writes to `emacs_reporter.db` in the c
 ```
 
 The uploader compresses the database with bzip2, assigns it a random name, and sends it to a Cloudflare bucket. No progress output — it either prints `done` or an error. The 50 MB post-compression limit covers months of normal usage. If your database exceeds that, contact me directly.
+
+Note: rate limiter per ip is enabled as well as some sanity checks on the upload. File an issue if something doesn't work on reporter side.
 
 ---
 
@@ -79,3 +83,7 @@ Every sample (10 min interval) records the following:
 | `meta` | `os_version` | macOS version string |
 
 Nothing outside this table is collected. The database stays on your machine until you run the uploader.
+
+## Privacy
+
+Once data starts flowing I'll periodically merge all submitted databases into a single dataset for analysis. The only potentially identifying field is `binary_path` — the path to your Emacs binary. If you built or installed Emacs somewhere under your home directory, this will contain your username (e.g. `/Users/john/...`). I'll replace that prefix with `$HOME` before publishing any merged dataset, but you should be aware of this before submitting. If your Emacs is installed via Homebrew or `/Applications` — which covers most cases — no username is present.

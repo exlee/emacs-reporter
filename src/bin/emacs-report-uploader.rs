@@ -23,12 +23,17 @@ fn main() -> anyhow::Result<()> {
     validate_sqlite(&db_path)?;
     validate_size(&db_path)?;
 
+    let Ok(user_hash) = read_user_hash(&db_path) else {
+        println!("error: no meta.user_hash in database, exiting");
+        return Ok(());
+    };
+
     println!("compressing...");
     let compressed = compress(&db_path)?;
     let compressed_kb = compressed.len() / 1024;
     println!("compressed: {compressed_kb} KB");
 
-    let filename = format!("{}.db.bz2", new_uuidv7());
+    let filename = format!("{}.db.bz2", user_hash);
     println!("uploading as {filename}...");
 
     upload(&compressed, &filename)?;
@@ -116,39 +121,13 @@ fn upload(data: &[u8], filename: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-// ── UUIDv7 ────────────────────────────────────────────────────────────────────
-
-fn new_uuidv7() -> String {
-    // UUIDv7: 48 bits of unix ms timestamp + version + 74 bits random
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
-
-    let mut rng_bytes = [0u8; 10];
-    getrandom::fill(&mut rng_bytes).expect("getrandom failed");
-
-    let ts_high = (now_ms >> 16) as u32;
-    let ts_low = (now_ms & 0xffff) as u16;
-
-    // version 7 in top nibble of byte 6
-    let b6 = (0x70u8) | (rng_bytes[0] & 0x0f);
-    // variant bits 10xxxxxx in byte 8
-    let b8 = (0x80u8) | (rng_bytes[2] & 0x3f);
-
-    format!(
-        "{:08x}-{:04x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-        ts_high,
-        ts_low,
-        b6,
-        rng_bytes[1],
-        b8,
-        rng_bytes[3],
-        rng_bytes[4],
-        rng_bytes[5],
-        rng_bytes[6],
-        rng_bytes[7],
-        rng_bytes[8],
-        rng_bytes[9],
-    )
+// read user_hash from the database before compressing
+fn read_user_hash(path: &Path) -> anyhow::Result<String> {
+    let conn = rusqlite::Connection::open(path)?;
+    let hash: String = conn.query_row(
+        "SELECT user_hash FROM meta WHERE id = 1",
+        [],
+        |r| r.get(0),
+    )?;
+    Ok(hash)
 }
