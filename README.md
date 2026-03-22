@@ -93,6 +93,20 @@ Every sample (10 min interval) records the following:
 | `meta` | `user_hash` | Random UUID generated once — no PII, used to deduplicate uploads |
 | `meta` | `os_version` | macOS version string |
 
+The following is recorded once, not per sample:
+
+| Table | Field | Description |
+|---|---|---|
+| `system_info` | `total_ram` | Total physical RAM in bytes |
+| `system_info` | `cpu_arch` | CPU architecture (e.g. `arm64`) |
+| `system_info` | `cpu_cores` | Logical CPU count |
+| `system_info` | `hw_model` | Hardware model identifier (e.g. `Mac14,3`) |
+| `system_info` | `cpu_brand` | CPU brand string (e.g. `Apple M2`) |
+| `installed_package` | `name`, `version` | Name and version of each installed ELPA package |
+| `process_package` | `process_id`, `package_id` | Links each Emacs process to its installed packages |
+
+System info is recorded on first launch. Package list is recorded when an Emacs process is first seen — package.el installs to `~/.emacs.d/elpa` (or the XDG equivalent), so packages installed via other mechanisms (straight.el, Borg, manual) are not captured.
+
 Nothing outside this table is collected. The database stays on your machine until you run the uploader.
 
 ## Privacy
