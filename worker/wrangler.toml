@@ -1,0 +1,11 @@
+name = "emacs-reporter-uploader"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+[[r2_buckets]]
+binding = "DB_BUCKET"
+bucket_name = "emacs-reporter-drop"
+
+[[kv_namespaces]]
+binding = "RATE_LIMIT"
+id = "8bbc2a040c7a4041ac9b97888acf072d"

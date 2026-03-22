@@ -1,4 +1,4 @@
 /target
-/worker
 emacs_reporter.db*
 .DS_Store
+.wrangler
