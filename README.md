@@ -1,3 +1,6 @@
+> [!WARNING]
+> The database schema is not yet stable and may change between releases, requiring data to be re-collected from scratch. Do not use this for long-term collection yet. Follow emacs-devel list for announcements when it stabilises.
+
 # emacs-reporter
 
 Collects Emacs process metrics over time and stores them locally in a SQLite database. If you're willing to share your data, there's an uploader too.
@@ -39,7 +42,7 @@ The reporter samples every 10 minutes and writes to `emacs_reporter.db` in the c
 ./emacs-report-uploader /path/to/emacs_reporter.db
 ```
 
-The uploader compresses the database with bzip2, assigns it a random name, and sends it to a Cloudflare bucket. No progress output — it either prints `done` or an error. The 50 MB post-compression limit covers months of normal usage. If your database exceeds that, contact me directly.
+The uploader compresses the database with bzip2, assigns it a randomly generated user hash, and sends it to a Cloudflare bucket. No progress output — it either prints `done` or an error. The 50 MB post-compression limit covers months of normal usage. If your database exceeds that, contact me directly.
 
 Note: rate limiter per ip is enabled as well as some sanity checks on the upload. File an issue if something doesn't work on reporter side.
 
