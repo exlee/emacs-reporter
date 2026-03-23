@@ -3,6 +3,9 @@
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
+#[path = "../motd.rs"]
+mod motd;
+
 // Baked in at compile time via environment variable
 const UPLOAD_URL: &str = match option_env!("EMACS_REPORTER_UPLOAD_URL") {
         Some(url) => url,
@@ -16,6 +19,8 @@ const SQLITE_MAGIC: &[u8] = b"SQLite format 3\0";
 const MAX_SIZE_BYTES: u64 = 50 * 1024 * 1024;
 
 fn main() -> anyhow::Result<()> {
+    motd::fetch_and_print();
+
     let db_path = resolve_db_path()?;
 
     println!("found: {}", db_path.display());

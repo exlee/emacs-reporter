@@ -8,6 +8,7 @@ use rusqlite::{Connection, params};
 use tracing::{error, info, warn};
 
 mod extra_data;
+mod motd;
 mod packages;
 mod platform;
 mod display_data;
@@ -66,6 +67,8 @@ fn new_uuid() -> String {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
+
+    motd::fetch_and_print();
 
     let conn = open_db(DB_PATH)?;
     ensure_schema(&conn)?;

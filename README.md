@@ -112,3 +112,5 @@ Nothing outside this table is collected. The database stays on your machine unti
 ## Privacy
 
 Once data starts flowing I'll periodically merge all submitted databases into a single dataset for analysis. The only potentially identifying field is `binary_path` — the path to your Emacs binary. If you built or installed Emacs somewhere under your home directory, this will contain your username (e.g. `/Users/john/...`). I'll replace that prefix with `$HOME` before publishing any merged dataset, but you should be aware of this before submitting. If your Emacs is installed via Homebrew or `/Applications` — which covers most cases — no username is present.
+
+On startup, both the reporter and the uploader attempt to fetch and display a message of the day from `https://xlii.space/emacs/motd.txt`. This request is used to get a rough sense of how many people are running the tools, based on IP address only — no other data is sent. The MOTD is also the main channel for communicating with users: collection end dates, new versions, schema changes, etc. The request times out after 500 ms and fails silently if the server is unreachable.
